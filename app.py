@@ -1,13 +1,12 @@
-from tokenize import String
 from flask import Flask,jsonify,request,make_response
+from werkzeug.security import generate_password_hash,check_password_hash
 from flask_sqlalchemy import SQLAlchemy
-from sympy import public
 from functools import wraps 
 import jwt
 import datetime
 
 app = Flask(__name__)
-app.config['SECRET_KEY']='this_is_the_secret_key'
+app.config['SECRET_KEY']='secretkey'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS']=False
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////Users/asims/Desktop/Teams/database.db'
 db = SQLAlchemy(app)
@@ -19,13 +18,23 @@ def token_required(f):
 
         if not token:
             return jsonify({'message':'Token is missing!'}) ,403        
-        try:
-            data = jwt.decode(token, app.config['SECRET_KEY'])
-        except:
-            return jsonify({'message': 'token is invalid'}) , 403
+        else:
+            try:
+                jwt.decode(token, options={"verify_signature": False})
+                
+        
+            except:
+                return jsonify({'message': 'token is invalid'}) , 403
         
         return f(*args,**kwargs)
     return decorated
+
+class Users(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    public_id = db.Column(db.Integer)
+    name = db.Column(db.String(50))
+    password = db.Column(db.String(50))
+    admin = db.Column(db.Boolean)
 
 class Tactics(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -35,19 +44,35 @@ class Tactics(db.Model):
     game_plan=db.Column(db.String(50), unique=False, nullable=False)
 
 
+
 class Teams(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     team_name = db.Column(db.String(80), unique=True, nullable=False)
     coach_name = db.Column(db.String(120), unique=True, nullable=False)
     players=db.Column(db.String(200), unique=True, nullable=False)
+    
 
 @app.route("/login")
 def login():
-    auth=request.authorization
-    if auth  and auth.username=="admin" and  auth.password=="password":
-        token=jwt.encode({'user':auth.username, 'exp': datetime.datetime.utcnow()+datetime.timedelta(minutes=60)},app.config['SECRET_KEY'])
-        return jsonify({'token':token})
-    return make_response('Could verify!',401,{'WWW-Authenticate':'Basic realm="Login Required"'})
+    auth = request.authorization
+
+    if not auth or not auth.username or not auth.password:
+        return make_response('Could not verify', 401, {'WWW-Authenticate' : 'Basic realm="Login required!"'})
+
+    user = Users.query.filter_by(name=auth.username).first()
+
+    if not user:
+        return make_response('Could not verify', 401, {'WWW-Authenticate' : 'Basic realm="Login required!"'})
+
+    if check_password_hash(user.password, auth.password):
+        
+        token = jwt.encode({'public_id' : user.public_id, 
+                            'exp' : datetime.datetime.utcnow() + datetime.timedelta(minutes=30)},
+                           app.config['SECRET_KEY'])
+        return jsonify({'token' : token})
+
+    return make_response('Could not verify', 401, {'WWW-Authenticate' : 'Basic realm="Login required!"'})
+
 
 @app.route('/teams', methods=['GET'])
 def get_all_teams():
@@ -62,6 +87,7 @@ def get_all_teams():
         output.append(team_data)
 
     return jsonify({'Teams': output})
+
 
 @app.route('/teams/<team_name>', methods=['GET'])
 
@@ -83,7 +109,6 @@ def get_one_team(team_name):
 @app.route('/teams/<team_name>/tactic', methods=['GET'])
 @token_required
 def get_team_tactic(team_name):
-    
     tactic=Tactics.query.filter_by(team_name=team_name).first()
     
     if not tactic:
