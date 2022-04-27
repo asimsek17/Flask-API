@@ -1,6 +1,5 @@
 import pytest
 import requests
-import requests
 from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String
 from app import Teams, db, Tactics
 
